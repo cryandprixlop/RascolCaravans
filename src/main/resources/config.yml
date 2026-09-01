@@ -1,0 +1,39 @@
+caravan:
+  max-active-per-player: 3
+  max-guards: 1
+  max-success-chance: 95
+  fail-loss-percent: 50
+  guard-cost-percent-of-max-profit: 10
+  guard-success-bonus: 15
+
+tiers:
+  1:
+    name: "&aМалый караван"
+    min: 1
+    max: 20000
+    hours: 12
+    success: 90
+    profit-min: 5
+    profit-max: 12
+    guards-allowed: false
+    routes: ["Дорога Прибрежья", "Торговый тракт"]
+  2:
+    name: "&eСредний караван"
+    min: 20000
+    max: 100000
+    hours: 24
+    success: 75
+    profit-min: 10
+    profit-max: 25
+    guards-allowed: true
+    routes: ["Степной путь", "Перевал Костей"]
+  3:
+    name: "&cБольшой караван"
+    min: 100000
+    max: 1000000
+    hours: 36
+    success: 55
+    profit-min: 25
+    profit-max: 35
+    guards-allowed: true
+    routes: ["Пепельный проход", "Дорога в Никуда"]
