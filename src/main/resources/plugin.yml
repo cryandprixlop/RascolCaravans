@@ -1,0 +1,9 @@
+name: RaskolCaravans
+version: 1.0.0
+main: ru.raskol.caravans.CaravansPlugin
+api-version: '1.21'
+depend: [Vault]
+softdepend: [FancyNPCs]
+commands:
+  caravan:
+    aliases: [cv]
