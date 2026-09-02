@@ -22,11 +22,20 @@ import java.util.UUID;
 public final class CaravanService {
 
     public static final class TierSpec {
-        public final int tier; public final String name; public final double min; public final double max;
-        public final int hours; public final double success; public final double profitMin; public final double profitMax;
-        public final boolean guardsAllowed; public final List<String> routes;
+        public final int tier;
+        public final String name;
+        public final double min;
+        public final double max;
+        public final int hours;
+        public final double success;
+        public final double profitMin;
+        public final double profitMax;
+        public final boolean guardsAllowed;
+        public final List<String> routes;
+
         TierSpec(int t, String n, double mn, double mx, int h, double s, double pmin, double pmax, boolean g, List<String> r) {
-            tier=t; name=n; min=mn; max=mx; hours=h; success=s; profitMin=pmin; profitMax=pmax; guardsAllowed=g; routes=r;
+            tier = t; name = n; min = mn; max = mx; hours = h; success = s;
+            profitMin = pmin; profitMax = pmax; guardsAllowed = g; routes = r;
         }
     }
 
@@ -66,50 +75,77 @@ public final class CaravanService {
     public void invest(Player p, int tier, double amount, boolean wantGuard) {
         TierSpec t = tiers.get(tier);
         if (t == null) { msg(p, "&cНет такого уровня."); return; }
-        if (amount < t.min || amount > t.max) { msg(p, "&cДиапазон уровня " + tier + ": &e" + t.min + "–" + t.max + "⚜"); return; }
-        if (byOwner(p.getUniqueId()).size() >= plugin.getConfig().getInt("caravan.max-active-per-player", 3)) {
-            msg(p, "&cДостигнут лимит активных караванов."); return;
+        if (amount < t.min || amount > t.max) {
+            msg(p, "&cДиапазон уровня " + tier + ": &e" + (long) t.min + "–" + (long) t.max + "⚜");
+            return;
         }
-        int guards = 0; double guardCost = 0;
+        if (byOwner(p.getUniqueId()).size() >= plugin.getConfig().getInt("caravan.max-active-per-player", 3)) {
+            msg(p, "&cДостигнут лимит активных караванов.");
+            return;
+        }
+
+        int guards = 0;
+        double guardCost = 0;
         if (wantGuard) {
             if (!t.guardsAllowed) { msg(p, "&cНа этом уровне стража недоступна."); return; }
             guards = plugin.getConfig().getInt("caravan.max-guards", 1);
-            double maxProfit = amount * t.profitMax / 100.0;
-            guardCost = round2(maxProfit * plugin.getConfig().getInt("caravan.guard-cost-percent-of-max-profit", 10) / 100.0 * guards);
+            // ИЗМЕНЕНО: стража = 10% от вложения (amount), а не от максимальной прибыли
+            guardCost = round2(amount * plugin.getConfig().getInt("caravan.guard-cost-percent-of-max-profit", 10) / 100.0 * guards);
         }
+
         double total = round2(amount + guardCost);
-        if (!economy.withdrawPlayer(p, total).transactionSuccess()) { msg(p, "&cНужно &e" + total + "⚜&c."); return; }
+        if (!economy.withdrawPlayer(p, total).transactionSuccess()) {
+            msg(p, "&cНужно &e" + total + "⚜&c (вложение " + amount + " + стража " + guardCost + ").");
+            return;
+        }
 
         long now = System.currentTimeMillis();
         String route = t.routes.isEmpty() ? "Тракт" : t.routes.get(random.nextInt(t.routes.size()));
-        Caravan c = new Caravan(UUID.randomUUID().toString().substring(0, 8), p.getUniqueId(),
-                tier, route, amount, guards, now, now + t.hours * 3_600_000L);
-        repository.add(c); repository.saveAsync();
-        msg(p, "&aКараван &e" + route + " &a(" + t.name + "&a) ушёл в путь на &e" + t.hours + " ч&a. Вложено &e" + amount + "⚜&a"
-                + (guards > 0 ? " + стража &e" + guards + " &a(-" + guardCost + "⚜)" : "") + ".");
+        Caravan c = new Caravan(
+                UUID.randomUUID().toString().substring(0, 8),
+                p.getUniqueId(),
+                tier, route, amount, guards,
+                now, now + (long) t.hours * 3_600_000L);
+        repository.add(c);
+        repository.saveAsync();
+
+        msg(p, "&aКараван &e" + route + " &a(" + t.name + "&a) ушёл в путь на &e" + t.hours + " ч&a.");
+        msg(p, "&7Вложение: &e" + amount + "⚜"
+                + (guards > 0 ? " + стража &e" + guards + " &7(-" + guardCost + "⚜) — успех +" + (guards * plugin.getConfig().getInt("caravan.guard-success-bonus", 15)) + "%" : "")
+                + " &7| Всего списано: &e" + total + "⚜&7.");
     }
 
     public void collect(Player p, String id) {
         Caravan c = repository.get(id);
         if (c == null || !c.getOwner().equals(p.getUniqueId())) { msg(p, "&cКараван не найден."); return; }
-        if (!c.isReady(System.currentTimeMillis())) { msg(p, "&cКараван ещё в пути."); return; }
-        TierSpec t = tiers.get(c.getTier());
+        if (!c.isReady(System.currentTimeMillis())) {
+            long left = Math.max(0, (c.getArriveMillis() - System.currentTimeMillis()) / 60_000L);
+            msg(p, "&cКараван ещё в пути, осталось ~" + left + " мин.");
+            return;
+        }
 
-        double chance = Math.min(plugin.getConfig().getInt("caravan.max-success-chance", 95),
-                t.success + c.getGuards() * plugin.getConfig().getInt("caravan.guard-success-bonus", 15));
+        TierSpec t = tiers.get(c.getTier());
+        double baseChance = t.success + c.getGuards() * plugin.getConfig().getInt("caravan.guard-success-bonus", 15);
+        double chance = Math.min(plugin.getConfig().getInt("caravan.max-success-chance", 95), baseChance);
         boolean success = random.nextDouble() * 100 < chance;
+
         double payout;
         if (success) {
             double pct = t.profitMin + random.nextDouble() * (t.profitMax - t.profitMin);
             double profit = round2(c.getAmount() * pct / 100.0);
             payout = round2(c.getAmount() + profit);
-            msg(p, "&a✅ Караван &e" + c.getRoute() + " &aвернулся с прибылью &e" + profit + "⚜ &a(" + String.format("%.1f", pct) + "%)! Выплачено &e" + payout + "⚜&a.");
+            msg(p, "&a✅ Караван &e" + c.getRoute() + " &aвернулся с прибылью &e" + profit + "⚜ &a(" + String.format("%.1f", pct) + "%)!");
+            msg(p, "&aВозвращено &e" + payout + "⚜ &a(вложение + прибыль).");
         } else {
-            payout = round2(c.getAmount() * (100 - plugin.getConfig().getInt("caravan.fail-loss-percent", 50)) / 100.0);
-            msg(p, "&c❌ Караван &e" + c.getRoute() + " &cразграблен! Возвращено только &e" + payout + "⚜&c.");
+            double loss = plugin.getConfig().getInt("caravan.fail-loss-percent", 50);
+            payout = round2(c.getAmount() * (100 - loss) / 100.0);
+            msg(p, "&c❌ Караван &e" + c.getRoute() + " &cразграблен! Потеряно &e" + loss + "%&c, возвращено &e" + payout + "⚜&c.");
         }
+
         if (payout > 0) economy.depositPlayer(p, payout);
-        repository.remove(id); notified.remove(id); repository.saveAsync();
+        repository.remove(id);
+        notified.remove(id);
+        repository.saveAsync();
     }
 
     public void notifyReady() {
@@ -117,17 +153,25 @@ public final class CaravanService {
         for (Caravan c : repository.getAll()) {
             if (c.isReady(now) && !notified.contains(c.getId())) {
                 Player p = Bukkit.getPlayer(c.getOwner());
-                if (p != null) { msg(p, "&6⛺ Ваш караван &e" + c.getRoute() + " &6вернулся! Заберите выручку: /caravan"); notified.add(c.getId()); }
+                if (p != null) {
+                    msg(p, "&6⛺ Ваш караван &e" + c.getRoute() + " &6вернулся! Заберите: &e/caravan");
+                    notified.add(c.getId());
+                }
             }
         }
     }
 
     public List<Caravan> byOwner(UUID uuid) {
         List<Caravan> list = new ArrayList<>();
-        for (Caravan c : repository.getAll()) if (c.getOwner().equals(uuid)) list.add(c);
+        for (Caravan c : repository.getAll()) {
+            if (c.getOwner().equals(uuid)) list.add(c);
+        }
         return list;
     }
 
     private double round2(double v) { return Math.round(v * 100.0) / 100.0; }
-    public void msg(Player p, String text) { p.sendMessage(ChatColor.translateAlternateColorCodes('&', text)); }
+
+    public void msg(Player p, String text) {
+        p.sendMessage(ChatColor.translateAlternateColorCodes('&', text));
+    }
 }
